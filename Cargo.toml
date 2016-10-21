@@ -1,0 +1,11 @@
+[package]
+name = "purple_hammer"
+version = "0.1.0"
+authors = ["Shtong <shtong@mm.st>"]
+
+[dependencies.irc]
+version = "0.11.4"
+default-features = false
+features = ["encode"]
+
+[dependencies]

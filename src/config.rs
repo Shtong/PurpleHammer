@@ -24,6 +24,15 @@ impl HammerConfig {
         }
     }
 
+    pub fn get_irc_channel(&self) -> Option<String> {
+        if let Some(ref chan_name) = self.channel {
+            Some(format!("#{}", chan_name.to_lowercase()))
+        }
+        else {
+            None
+        }
+    }
+
     pub fn fill_from_file<P: AsRef<Path>>(&mut self, source: P) -> Result<(), Error> {
         let mut file = try!(File::open(source));
         let mut file_text = String::new();

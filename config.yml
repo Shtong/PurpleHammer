@@ -1,0 +1,12 @@
+# The Twitch user name of your bot
+username: Bot_Name
+
+# An OpenID authentication token. DO NO USE THE ACTUAL TWITCH PASSWORD.
+# If you need to generate an OpenID token, you can create one here http://www.twitchapps.com/tmi
+oauth: "oauth:aaabbbcccddd"
+
+# Name of the channel the bot should connect to
+channel: Your_Favorite_Streamer
+
+# Optionnal. A string or list of strings containing the name of the bot owners 
+#owners: Your_name_Here

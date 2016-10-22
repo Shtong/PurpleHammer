@@ -9,3 +9,6 @@ default-features = false
 features = ["encode"]
 
 [dependencies]
+yaml-rust = "0.3"
+log = "0.3"
+log4rs = "0.5"

@@ -47,13 +47,6 @@ fn main() {
     }
 }
 
-// fn read_oauth_token() -> Result<String> {
-//     let mut result = String::new();
-//     let mut file = try!(File::open("twitch_openid.txt"));
-//     try!(file.read_to_string(&mut result));
-//     Ok(result)
-// }
-
 fn init_logger() -> std::result::Result<(), log4rs::Error> {
     let conf_file_name = "logging.yml";
     if Path::new(conf_file_name).exists() {

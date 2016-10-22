@@ -22,16 +22,16 @@ fn main() {
 
     let irc_config = app_config.to_irc_config();
 
-    println!("Connecting to IRC with token ...");
+    info!("Connecting to IRC...");
     let server = IrcServer::from_config(irc_config).unwrap();
     server.identify().unwrap();
-    println!("Connected!");
+    info!("Connected!");
 
     let my_checker = checker::Checker::new();
 
     for message in server.iter() {
         let message = message.unwrap();
-        println!("Message received : {}", message);
+        debug!("Message received : {}", message);
         match message.command {
             Command::JOIN(ref target, _, _) => server.send_privmsg(target, "hi").unwrap(),
             Command::PRIVMSG(ref target, ref msg) => {

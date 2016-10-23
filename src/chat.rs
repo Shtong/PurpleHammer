@@ -1,5 +1,7 @@
 extern crate irc;
 
+use std::collections::HashMap;
+
 use irc::client::prelude::*;
 use irc::client::data::command::CapSubCommand;
 
@@ -17,18 +19,45 @@ pub struct Chat {
     cap_membership_enabled: bool,
     cap_commands_enabled: bool,
     cap_tags_enabled: bool,
+    all_users: Vec<ChatUser>, // Chat owner (streamer) is always at index 0!
+    user_index_names: HashMap<String, usize>,
+}
+
+struct ChatUser {
+    name: String,
+    is_mod: bool,
+    is_regular: bool,
 }
 
 impl Chat {
     pub fn new(conf : &HammerConfig) -> Chat {
-        Chat {
-            server: IrcServer::from_config(conf.to_irc_config()).unwrap(),
-            name: conf.get_irc_channel().unwrap(),
-            checker: Checker::new(),
-            cap_membership_enabled: false,
-            cap_commands_enabled: false,
-            cap_tags_enabled: false,
+        if let Some(ref channel) = conf.channel {
+            let streamer_name = channel.to_lowercase();
+            
+            let mut result = Chat {
+                server: IrcServer::from_config(conf.to_irc_config()).unwrap(),
+                name: format!("#{}", streamer_name),
+                checker: Checker::new(),
+                cap_membership_enabled: false,
+                cap_commands_enabled: false,
+                cap_tags_enabled: false,
+                all_users: Vec::new(),
+                user_index_names: HashMap::new(),
+            };
+
+            result.user_index_names.insert(streamer_name.clone(), 0);
+            result.all_users.push(ChatUser {
+                name: streamer_name,
+                is_mod: true,
+                is_regular: true,
+            });
+
+            result
         }
+        else {
+            panic!("The configuration has not been correctly initialized");
+        }
+
     }
 
     pub fn run(&mut self) {
@@ -47,16 +76,10 @@ impl Chat {
             let message = message.unwrap();
             debug!("Message received : {}", message);
             match message.command {
-                Command::JOIN(ref target, _, _) => {
-                    if target == self.name.as_str() {
-                        self.server.send_privmsg(target, "Hi").unwrap();
-                    }
-                    else {
-                        warn!("I joined an unexpected channel '{}'!", target);
-                    }
-                },
-                Command::PRIVMSG(_, ref msg) => {
-                    if self.checker.check(msg.trim()) {
+                Command::PRIVMSG(ref nickname, ref msg) => {
+                    let ref user = self.all_users[self.user_get_or_create(nickname)];
+
+                    if !user.is_mod && !user.is_regular && self.checker.check(msg.trim()) {
                         self.send("DansGame");
                     }
                     else {
@@ -82,8 +105,19 @@ impl Chat {
                         }
                         _ => {},
                     }
+                },
+                Command::MODE(channel, mode, nickname) => {
+                    if channel == self.name {
+                        if let Some(ref nickname_str) = nickname {
+                            match mode.as_ref() {
+                                "+o" => self.user_set_is_mod(nickname_str, true),
+                                "-o" => self.user_set_is_mod(nickname_str, false),
+                                _ => debug!("Unhandled MODE change '{}' on user '{}'.", mode, nickname_str),
+                            }
+                        }
+                    }
                 }
-                _ => (),
+                _ => debug!("Unhandled command {:?}", message.command),
             }
         }
 
@@ -95,6 +129,44 @@ impl Chat {
             error!("Could not send a message on {}!", self.name);
             debug!(" - Message was '{}'", msg);
             debug!(" - Error was {}", error);
+        }
+    }
+
+    fn parse_user_name(user_full_name: &str) -> Option<&str> {
+        if let Some(pos) = user_full_name.find('!') {
+            Some(&user_full_name[..pos])
+        }
+        else {
+            info!("Invalid user descriptor, could not parse. '{}'", user_full_name);
+            None
+        }
+    }
+
+    fn user_set_is_mod(&mut self, user_full_name: &str, is_mod: bool) {
+        if let Some(user_name) = Chat::parse_user_name(user_full_name) {
+            let user_pos = self.user_get_or_create(user_name);
+            self.all_users[user_pos].is_mod = is_mod;
+        }
+    }
+
+    fn user_get_or_create(&mut self, user_name: &str) -> usize {
+        if let Some(pos) = self.user_index_names.get(user_name) {
+            *pos
+        }
+        else {
+            let owned_name = user_name.to_owned();
+            // Create a new user
+            let new_user = ChatUser {
+                name: owned_name,
+                is_mod: false,
+                is_regular: false,
+            };
+
+            // Add it to the list
+            let pos = self.all_users.len();
+            self.user_index_names.insert(new_user.name.clone(), pos);
+            self.all_users.push(new_user);
+            pos
         }
     }
 }

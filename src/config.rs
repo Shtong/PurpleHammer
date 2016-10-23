@@ -10,7 +10,7 @@ use yaml_rust::scanner::ScanError;
 pub struct HammerConfig {
     username: Option<String>,
     oauth: Option<String>,
-    channel: Option<String>,
+    pub channel: Option<String>,
     owners: Option<Vec<String>>,
 }
 
@@ -21,15 +21,6 @@ impl HammerConfig {
             oauth: None,
             channel: None,
             owners: None,
-        }
-    }
-
-    pub fn get_irc_channel(&self) -> Option<String> {
-        if let Some(ref chan_name) = self.channel {
-            Some(format!("#{}", chan_name.to_lowercase()))
-        }
-        else {
-            None
         }
     }
 

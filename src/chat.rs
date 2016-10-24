@@ -23,7 +23,7 @@ pub struct Chat {
 }
 
 struct ChatUser {
-    name: String,
+    nickname: String,
     is_mod: bool,
     is_regular: bool,
 }
@@ -44,7 +44,7 @@ impl Chat {
             };
 
             result.all_users.insert(streamer_name.clone(), ChatUser {
-                name: streamer_name,
+                nickname: streamer_name,
                 is_mod: true,
                 is_regular: true,
             });
@@ -81,7 +81,7 @@ impl Chat {
             }
         }
 
-        info!("Disconnected from channel {}", self.channel);
+        info!("Disconnected from server");
     }
 
     fn read_next_message(&self) -> Option<Message> {
@@ -147,6 +147,13 @@ impl Chat {
                     }
                 }
             }
+            Command::NOTICE(msgtarget, message) => {
+                if message == "Login authentication failed" {
+                    // Whops
+                    error!("The remote server rejected the OpenID token. Make sure it is correct in your configuration file!");
+                    // We could exit here, but we'll let the connection close by itself
+                }
+            }
             _ => debug!("Unhandled command {:?}", message.command),
         }
 
@@ -188,7 +195,7 @@ impl Chat {
             let owned_nickname = nickname.to_owned();
             // Create a new user
             let new_user = ChatUser {
-                name: owned_nickname.clone(),
+                nickname: owned_nickname.clone(),
                 is_mod: false,
                 is_regular: false,
             };

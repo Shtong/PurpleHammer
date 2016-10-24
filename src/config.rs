@@ -113,4 +113,10 @@ impl HammerConfig {
 
         result
     }
+
+    pub fn validate(&self) -> bool {
+        self.channel.is_some() && 
+        self.oauth.is_some() &&
+        self.username.is_some()
+    }
 }

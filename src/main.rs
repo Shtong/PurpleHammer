@@ -9,7 +9,7 @@ mod config;
 mod chat;
 
 use std::default::Default;
-use std::io::Result;
+use std::io::{Result, Error, ErrorKind};
 use std::path::Path;
 
 use config::HammerConfig;
@@ -43,6 +43,10 @@ fn load_config() -> Result<HammerConfig> {
     let dev_config_name = Path::new("config-dev.yml");
     if dev_config_name.exists() {
         try!(result.fill_from_file(dev_config_name));
+    }
+
+    if !result.validate() {
+        return Err(Error::new(ErrorKind::InvalidData, "The configuration is invalid! I'm out."));
     }
 
     Ok(result)

@@ -14,13 +14,12 @@ const CAP_TAGS : &'static str = "twitch.tv/tags";
 
 pub struct Chat {
     server: IrcServer,
-    name: String, 
+    channel: String, 
     checker: Checker,
     cap_membership_enabled: bool,
     cap_commands_enabled: bool,
     cap_tags_enabled: bool,
-    all_users: Vec<ChatUser>, // Chat owner (streamer) is always at index 0!
-    user_index_names: HashMap<String, usize>,
+    all_users: HashMap<String, ChatUser>,
 }
 
 struct ChatUser {
@@ -36,17 +35,15 @@ impl Chat {
             
             let mut result = Chat {
                 server: IrcServer::from_config(conf.to_irc_config()).unwrap(),
-                name: format!("#{}", streamer_name),
+                channel: format!("#{}", streamer_name),
                 checker: Checker::new(),
                 cap_membership_enabled: false,
                 cap_commands_enabled: false,
                 cap_tags_enabled: false,
-                all_users: Vec::new(),
-                user_index_names: HashMap::new(),
+                all_users: HashMap::new(),
             };
 
-            result.user_index_names.insert(streamer_name.clone(), 0);
-            result.all_users.push(ChatUser {
+            result.all_users.insert(streamer_name.clone(), ChatUser {
                 name: streamer_name,
                 is_mod: true,
                 is_regular: true,
@@ -61,7 +58,7 @@ impl Chat {
     }
 
     pub fn run(&mut self) {
-        info!("Connecting to IRC for channel {} ...", self.name);
+        info!("Connecting to IRC for channel {} ...", self.channel);
         self.server.identify().unwrap();
         info!("Connected!");
 
@@ -72,61 +69,93 @@ impl Chat {
             Capability::Custom(CAP_COMMANDS),
             Capability::Custom(CAP_TAGS)]).expect("Could not send capability requests");
 
-        for message in self.server.iter() {
-            let message = message.unwrap();
-            debug!("Message received : {}", message);
-            match message.command {
-                Command::PRIVMSG(ref nickname, ref msg) => {
-                    let ref user = self.all_users[self.user_get_or_create(nickname)];
-
-                    if !user.is_mod && !user.is_regular && self.checker.check(msg.trim()) {
-                        self.send("DansGame");
-                    }
-                    else {
-                        self.send("FrankerZ");
-                    }
-                },
-                Command::CAP(_, sub_command, _, param) => {
-                    match sub_command {
-                        CapSubCommand::ACK => {
-                            if let Some(param_str) = param {
-                                for one_param_str in param_str.split_whitespace() {
-                                    match one_param_str {
-                                        CAP_COMMANDS => self.cap_commands_enabled = true,
-                                        CAP_MEMBERSHIP => self.cap_membership_enabled = true,
-                                        CAP_TAGS => self.cap_tags_enabled = true,
-                                        &_ => debug!("Capability {} acknowledged", param_str),
-                                    }
-                                }
-                            }
-                            else {
-                                warn!("The server validated a capability, but I don't know which one?!?");
-                            }
-                        }
-                        _ => {},
-                    }
-                },
-                Command::MODE(channel, mode, nickname) => {
-                    if channel == self.name {
-                        if let Some(ref nickname_str) = nickname {
-                            match mode.as_ref() {
-                                "+o" => self.user_set_is_mod(nickname_str, true),
-                                "-o" => self.user_set_is_mod(nickname_str, false),
-                                _ => debug!("Unhandled MODE change '{}' on user '{}'.", mode, nickname_str),
-                            }
-                        }
-                    }
+        loop {
+            if let Some(message) = self.read_next_message() {
+                if !self.process_message(message) {
+                    break;
                 }
-                _ => debug!("Unhandled command {:?}", message.command),
+            }
+            else {
+                // No more messages; exit
+                break;
             }
         }
 
-        info!("Disconnected from channel {}", self.name);
+        info!("Disconnected from channel {}", self.channel);
+    }
+
+    fn read_next_message(&self) -> Option<Message> {
+        for msg in self.server.iter() {
+            match msg {
+                Ok(result) => {
+                    debug!("Message received : {}", result);
+                    return Some(result);
+                },
+                Err(err) => debug!("Error while reading a message: {}", err), 
+            }
+        };
+
+        return None;
+    }
+
+    fn process_message(&mut self, message: Message) -> bool {
+        match message.command {
+            Command::PRIVMSG(ref nickname, ref msg) => {
+                self.user_ensure_exists(nickname);
+
+                let user_is_known: bool;
+                {
+                    let ref user = self.all_users[nickname];
+                    user_is_known = user.is_mod || user.is_regular;
+                }
+
+                if !user_is_known && self.checker.check(msg.trim()) {
+                    self.send("DansGame");
+                }
+                else {
+                    self.send("FrankerZ");
+                }
+            },
+            Command::CAP(_, sub_command, _, param) => {
+                match sub_command {
+                    CapSubCommand::ACK => {
+                        if let Some(param_str) = param {
+                            for one_param_str in param_str.split_whitespace() {
+                                match one_param_str {
+                                    CAP_COMMANDS => self.cap_commands_enabled = true,
+                                    CAP_MEMBERSHIP => self.cap_membership_enabled = true,
+                                    CAP_TAGS => self.cap_tags_enabled = true,
+                                    &_ => debug!("Capability {} acknowledged", param_str),
+                                }
+                            }
+                        }
+                        else {
+                            warn!("The server validated a capability, but I don't know which one?!?");
+                        }
+                    }
+                    _ => {},
+                }
+            },
+            Command::MODE(channel, mode, nickname) => {
+                if channel == self.channel {
+                    if let Some(ref nickname_str) = nickname {
+                        match mode.as_ref() {
+                            "+o" => self.user_set_is_mod(nickname_str, true),
+                            "-o" => self.user_set_is_mod(nickname_str, false),
+                            _ => debug!("Unhandled MODE change '{}' on user '{}'.", mode, nickname_str),
+                        }
+                    }
+                }
+            }
+            _ => debug!("Unhandled command {:?}", message.command),
+        }
+
+        true
     }
 
     fn send(&self, msg: &str) {
-        if let Err(error) = self.server.send_privmsg(self.name.as_str(), msg) {
-            error!("Could not send a message on {}!", self.name);
+        if let Err(error) = self.server.send_privmsg(self.channel.as_str(), msg) {
+            error!("Could not send a message on {}!", self.channel);
             debug!(" - Message was '{}'", msg);
             debug!(" - Error was {}", error);
         }
@@ -143,30 +172,30 @@ impl Chat {
     }
 
     fn user_set_is_mod(&mut self, user_full_name: &str, is_mod: bool) {
-        if let Some(user_name) = Chat::parse_user_name(user_full_name) {
-            let user_pos = self.user_get_or_create(user_name);
-            self.all_users[user_pos].is_mod = is_mod;
+        if let Some(nickname) = Chat::parse_user_name(user_full_name) {
+            self.user_ensure_exists(nickname);
+            if let Some(user) = self.all_users.get_mut(nickname) {
+                user.is_mod = is_mod;
+            }
         }
     }
 
-    fn user_get_or_create(&mut self, user_name: &str) -> usize {
-        if let Some(pos) = self.user_index_names.get(user_name) {
-            *pos
+    fn user_ensure_exists(&mut self, nickname: &str) -> bool {
+        if self.all_users.contains_key(nickname) {
+            true
         }
         else {
-            let owned_name = user_name.to_owned();
+            let owned_nickname = nickname.to_owned();
             // Create a new user
             let new_user = ChatUser {
-                name: owned_name,
+                name: owned_nickname.clone(),
                 is_mod: false,
                 is_regular: false,
             };
 
             // Add it to the list
-            let pos = self.all_users.len();
-            self.user_index_names.insert(new_user.name.clone(), pos);
-            self.all_users.push(new_user);
-            pos
+            self.all_users.insert(owned_nickname, new_user);
+            false
         }
     }
 }

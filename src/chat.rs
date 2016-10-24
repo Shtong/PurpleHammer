@@ -147,7 +147,7 @@ impl Chat {
                     }
                 }
             }
-            Command::NOTICE(msgtarget, message) => {
+            Command::NOTICE(_, message) => {
                 if message == "Login authentication failed" {
                     // Whops
                     error!("The remote server rejected the OpenID token. Make sure it is correct in your configuration file!");
@@ -204,5 +204,20 @@ impl Chat {
             self.all_users.insert(owned_nickname, new_user);
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_user_name_correct() {
+        assert_eq!(Some("MyUser"), Chat::parse_user_name("MyUser!myuser@tmi.twitch.tv"));
+    }
+
+    #[test]
+    fn parse_user_name_incorrect() {
+        assert_eq!(None, Chat::parse_user_name("u wot?"));
     }
 }

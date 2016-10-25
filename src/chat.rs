@@ -1,6 +1,8 @@
 extern crate irc;
 
-use std::collections::HashMap;
+use std::borrow::Borrow;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher}
 
 use irc::client::prelude::*;
 use irc::client::data::command::CapSubCommand;
@@ -12,6 +14,34 @@ const CAP_MEMBERSHIP : &'static str = "twitch.tv/membership";
 const CAP_COMMANDS : &'static str = "twitch.tv/commands";
 const CAP_TAGS : &'static str = "twitch.tv/tags";
 
+#[derive(Debug)]
+struct ChatUser {
+    nickname: String,
+    is_mod: bool,
+    is_regular: bool,
+}
+
+impl Borrow<str> for ChatUser {
+    fn borrow(&self) -> &str {
+        self.nickname.as_str()
+    }
+}
+
+impl PartialEq for ChatUser {
+    fn eq(&self, other: &ChatUser) -> bool {
+        self.nickname == self.nickname
+    }
+}
+
+impl Eq for ChatUser {}
+
+impl Hash for ChatUser {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.nickname.hash(state);
+    }
+}
+
+#[derive(Debug)]
 pub struct Chat {
     server: IrcServer,
     channel: String, 
@@ -19,13 +49,7 @@ pub struct Chat {
     cap_membership_enabled: bool,
     cap_commands_enabled: bool,
     cap_tags_enabled: bool,
-    all_users: HashMap<String, ChatUser>,
-}
-
-struct ChatUser {
-    nickname: String,
-    is_mod: bool,
-    is_regular: bool,
+    all_users: HashSet<ChatUser>,
 }
 
 impl Chat {
@@ -40,10 +64,10 @@ impl Chat {
                 cap_membership_enabled: false,
                 cap_commands_enabled: false,
                 cap_tags_enabled: false,
-                all_users: HashMap::new(),
+                all_users: HashSet::new(),
             };
 
-            result.all_users.insert(streamer_name.clone(), ChatUser {
+            result.all_user s.insert(ChatUser {
                 nickname: streamer_name,
                 is_mod: true,
                 is_regular: true,
@@ -150,7 +174,7 @@ impl Chat {
             Command::NOTICE(_, message) => {
                 if message == "Login authentication failed" {
                     // Whops
-                    error!("The remote server rejected the OpenID token. Make sure it is correct in your configuration file!");
+                    error!("The remote server rejected the OAuth token. Make sure it is correct in your configuration file!");
                     // We could exit here, but we'll let the connection close by itself
                 }
             }

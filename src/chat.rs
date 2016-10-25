@@ -1,8 +1,6 @@
 extern crate irc;
 
-use std::borrow::Borrow;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher}
+use std::collections::HashMap;
 
 use irc::client::prelude::*;
 use irc::client::data::command::CapSubCommand;
@@ -21,27 +19,6 @@ struct ChatUser {
     is_regular: bool,
 }
 
-impl Borrow<str> for ChatUser {
-    fn borrow(&self) -> &str {
-        self.nickname.as_str()
-    }
-}
-
-impl PartialEq for ChatUser {
-    fn eq(&self, other: &ChatUser) -> bool {
-        self.nickname == self.nickname
-    }
-}
-
-impl Eq for ChatUser {}
-
-impl Hash for ChatUser {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.nickname.hash(state);
-    }
-}
-
-#[derive(Debug)]
 pub struct Chat {
     server: IrcServer,
     channel: String, 
@@ -49,7 +26,8 @@ pub struct Chat {
     cap_membership_enabled: bool,
     cap_commands_enabled: bool,
     cap_tags_enabled: bool,
-    all_users: HashSet<ChatUser>,
+    all_users: HashMap<String, ChatUser>,
+    ban_mode_enabled: bool,
 }
 
 impl Chat {
@@ -64,10 +42,11 @@ impl Chat {
                 cap_membership_enabled: false,
                 cap_commands_enabled: false,
                 cap_tags_enabled: false,
-                all_users: HashSet::new(),
+                ban_mode_enabled: false,
+                all_users: HashMap::new(),
             };
 
-            result.all_user s.insert(ChatUser {
+            result.all_users.insert(streamer_name.clone(), ChatUser {
                 nickname: streamer_name,
                 is_mod: true,
                 is_regular: true,
@@ -126,18 +105,34 @@ impl Chat {
         match message.command {
             Command::PRIVMSG(ref nickname, ref msg) => {
                 self.user_ensure_exists(nickname);
-
-                let user_is_known: bool;
+                let user_is_known;
+                let user_is_mod;
                 {
                     let ref user = self.all_users[nickname];
-                    user_is_known = user.is_mod || user.is_regular;
+                    user_is_mod = user.is_mod;
+                    user_is_known = user_is_mod || user.is_regular;
                 }
 
-                if !user_is_known && self.checker.check(msg.trim()) {
-                    self.send("DansGame");
+                if msg == ":hammer on" {
+                    if user_is_mod {
+                        self.ban_mode_enabled = true;
+                        self.send("⚠️ ATTENTION : Hammer mode has been enabled. Please refrain from sending messages that could look like what a bot would say!");
+                    }
                 }
-                else {
-                    self.send("FrankerZ");
+                else if msg == ":hammer off" {
+                    if user_is_mod {
+                        self.ban_mode_enabled = false;
+                        self.send("Hammer mode has been disabled. I'll stop banning now!");
+                    }
+                }
+                else if self.ban_mode_enabled {
+
+                    if !user_is_known && self.checker.check(msg.trim()) {
+                        self.send("DansGame");
+                    }
+                    else {
+                        self.send("FrankerZ");
+                    }
                 }
             },
             Command::CAP(_, sub_command, _, param) => {

@@ -2,6 +2,7 @@
 extern crate log;
 extern crate log4rs;
 extern crate irc;
+extern crate time;
 extern crate yaml_rust;
 
 mod checker;

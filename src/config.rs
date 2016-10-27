@@ -8,10 +8,10 @@ use yaml_rust::yaml::Yaml;
 use yaml_rust::scanner::ScanError;
 
 pub struct HammerConfig {
-    username: Option<String>,
-    oauth: Option<String>,
+    pub username: Option<String>,
+    pub oauth: Option<String>,
     pub channel: Option<String>,
-    owners: Option<Vec<String>>,
+    pub owners: Option<Vec<String>>,
 }
 
 impl HammerConfig {

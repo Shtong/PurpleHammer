@@ -116,6 +116,7 @@ impl Chat {
     }
 
     fn process_message(&mut self, message: Message) -> bool {
+        let start_time = now_utc();
         match message.command {
             Command::PRIVMSG(ref nickname, ref msg) => {
                 if nickname != self.my_nickname.as_str() { // Ignore messages sent by me
@@ -199,6 +200,8 @@ impl Chat {
             }
             _ => debug!("Unhandled command {:?}", message.command),
         }
+
+        debug!("Message processsed in {}ms", (now_utc() - start_time).num_milliseconds());
 
         true
     }

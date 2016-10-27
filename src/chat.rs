@@ -197,12 +197,20 @@ impl Chat {
                     error!("The remote server rejected the OAuth token. Make sure it is correct in your configuration file!");
                     // We could exit here, but we'll let the connection close by itself
                 }
+            },
+            Command::Raw(cmdname, args, suffix) {
+                debug!("Custom command '{}' reveived with args {:?} and suffix {:?}.", cmdname, args, suffix);
+                match cmdname.as_str() {
+                    "CLEARCHAT" => {
+                        debug!("CLEARCHAT !");
+                    }
+                    &_ => {}
+                }
             }
             _ => debug!("Unhandled command {:?}", message.command),
         }
 
         debug!("Message processsed in {}ms", (now_utc() - start_time).num_milliseconds());
-
         true
     }
 

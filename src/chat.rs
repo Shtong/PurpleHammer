@@ -25,7 +25,7 @@ enum ChatMessage {
     /// The channel was cleared
     Clear,
     /// A user was timed out (nickname, duration, reason)
-    Timeout(String, u16, Option<String>),
+    Timeout(String, u32, Option<String>),
     /// A user was banned (nickname, reason)
     Ban(String, Option<String>),
     /// A user was unbanned (nickname)
@@ -361,6 +361,43 @@ impl Chat {
                 debug!("Custom command '{}' reveived with args {:?} and suffix {:?}.", cmdname, args, suffix);
                 match cmdname.as_str() {
                     "CLEARCHAT" => {
+                        if let Some(nickname) = suffix {
+                            if let Some(tags) = message.tags {
+                                let mut duration: Option<u32> = None;
+                                let mut reason: Option<String> = None;
+
+                                for tag in tags {
+                                    let Tag(key, val_opt) = tag;
+                                    if let Some(val) = val_opt {
+                                        match key.as_str() {
+                                            "ban-duration" => duration = match u32::from_str(val.as_str()) {
+                                                Ok(numval) => Some(numval),
+                                                Err(_) => {
+                                                    warn!("Invalid ban duration {}", val);
+                                                    None
+                                                }
+                                            },
+                                            "ban-reason" => reason = Some(val),
+                                            &_ => debug!("Unexpected CLEARCHAT tag: {}={}", key, val),
+                                        }
+                                    }
+                                }
+
+                                if let Some(durval) = duration {
+                                    Some(ChatMessage::Timeout(nickname, durval, reason))
+                                }
+                                else {
+                                    Some(ChatMessage::Ban(nickname, reason))
+                                }
+                            }
+                            else {
+                                warn!("CLEARCHAT dropped: no tags");
+                                None
+                            }
+                        }
+                        else {
+                            Some(ChatMessage::Clear)
+                        }
                         // CLEAR 1s
                         // Message received : :tmi.twitch.tv CLEARCHAT #le_shtong :triplepat
                         // Custom command 'CLEARCHAT' reveived with args ["#le_shtong"] and suffix Some("triplepat").
@@ -373,10 +410,6 @@ impl Chat {
                         // Message received : :tmi.twitch.tv CLEARCHAT #le_shtong :triplepat
                         // Custom command 'CLEARCHAT' reveived with args ["#le_shtong"] and suffix Some("triplepat").
 
-                        // Unban
-
-                        debug!("CLEARCHAT !");
-                        None
                     },
                     "ROOMSTATE" => {
                         if let Some(msgtags) = message.tags {

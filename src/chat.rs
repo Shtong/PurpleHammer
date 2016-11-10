@@ -38,9 +38,6 @@ enum ChatMessage {
     Capability(Vec<String>),
     /// Invalid auth token notification
     InvalidAuthToken,
-    /// Other / Unknown
-    Unknown,
-    //Raw(Message),
 }
 
 enum TwitchUserType {
@@ -252,12 +249,17 @@ impl Chat {
         info!("Disconnected from server");
     }
 
+    /// Waits for the next message from the server and returns it.
     fn read_next_message(&self) -> Option<ChatMessage> {
         for msg in self.server.iter() {
             match msg {
                 Ok(result) => {
                     debug!("Message received : {}", result);
-                    return Some(Chat::parse_message(result));
+                    let result = Chat::parse_message(result);
+                    if result.is_some() {
+                        return result;
+                    }
+                    // if result is none, we skip that message and wait for the next one
                 },
                 Err(err) => debug!("Error while reading a message: {}", err), 
             }
@@ -266,84 +268,85 @@ impl Chat {
         return None;
     }
 
-    fn parse_message(message: Message) -> ChatMessage {
+    /// Turns a raw IRC message into something easier to process for the client
+    fn parse_message(message: Message) -> Option<ChatMessage> {
         match message.command {
             Command::PRIVMSG(nickname, msg) => {
                 if let Some(msgtags) = message.tags {
                     match MessageTagData::from_tags(msgtags) {
-                        Ok(tags) => ChatMessage::Message(
+                        Ok(tags) => Some(ChatMessage::Message(
                             nickname,
                             msg,
                             tags,
-                        ),
+                        )),
                         Err(msg) => {
                             warn!("Error while parsing message tags: {}", msg);
-                            ChatMessage::Unknown
+                            None
                         },
                     }
                 }
                 else {
-                    ChatMessage::Unknown
+                    None
                 }
             },
             Command::CAP(_, sub_command, _, param) => {
                 match sub_command {
                     CapSubCommand::ACK => {
                         if let Some(param_str) = param {
-                            ChatMessage::Capability(param_str.split_whitespace().map(|s| String::from_str(s).unwrap()).collect())
+                            Some(ChatMessage::Capability(param_str.split_whitespace().map(|s| String::from_str(s).unwrap()).collect()))
                         }
                         else {
                             warn!("The server acknowledged a capability, without saying which one?!?");
-                            ChatMessage::Unknown
+                            None
                         }
                     }
-                    _ => ChatMessage::Unknown,
+                    _ => None,
                 }
             },
             Command::MODE(_, mode, nickname_opt) => { 
                 if let Some(nickname) = nickname_opt {
                     match mode.as_str() {
-                        "+o" => ChatMessage::Operator(nickname, true),
-                        "-o" => ChatMessage::Operator(nickname, false),
-                        _ => ChatMessage::Unknown,
+                        "+o" => Some(ChatMessage::Operator(nickname, true)),
+                        "-o" => Some(ChatMessage::Operator(nickname, false)),
+                        _ => None,
                     }
                 }
                 else {
-                    ChatMessage::Unknown
+                    None
                 }
             },
             Command::NOTICE(_, content) => {
                 if content == "Login authentication failed" {
-                    ChatMessage::InvalidAuthToken
+                    Some(ChatMessage::InvalidAuthToken)
                 }
                 else {
-                    ChatMessage::Unknown
+                    None
                 }
             },
-            Command::JOIN(nickname, _, _) => ChatMessage::Join(nickname),
-            Command::PART(nickname, _) => ChatMessage::Leave(nickname),
+            Command::JOIN(nickname, _, _) => Some(ChatMessage::Join(nickname)),
+            Command::PART(nickname, _) => Some(ChatMessage::Leave(nickname)),
             Command::Raw(cmdname, args, suffix) => {
                 debug!("Custom command '{}' reveived with args {:?} and suffix {:?}.", cmdname, args, suffix);
                 match cmdname.as_str() {
                     "CLEARCHAT" => {
 
                         debug!("CLEARCHAT !");
-                        ChatMessage::Unknown
+                        None
                     },
                     "ROOMSTATE" => {
                         if let Some(msgtags) = message.tags {
-                            ChatMessage::RoomState(RoomStateTags::from_tags_list(msgtags))
+                            Some(ChatMessage::RoomState(RoomStateTags::from_tags_list(msgtags)))
                         }
                         else {
-                            ChatMessage::Unknown
+                            None
                         }
                     }
-                    &_ => ChatMessage::Unknown
+                    &_ => None
                 }                
             }
             _ => {
                 debug!("Unhandled message type: {:?}", message);
-                ChatMessage::Unknown
+                None
             }
         }
     }
@@ -455,22 +458,6 @@ impl Chat {
         }
     }
 
-    // fn parse_user_name(user_full_name: &str) -> Option<&str> {
-    //     if let Some(pos) = user_full_name.find('!') {
-    //         Some(&user_full_name[..pos])
-    //     }
-    //     else {
-    //         info!("Invalid user descriptor, could not parse. '{}'", user_full_name);
-    //         None
-    //     }
-    // }
-
-    // fn user_set_is_mod(&mut self, nickname: &str, is_mod: bool) {
-    //     if let Some(user) = self.all_users.get_mut(nickname) {
-    //         user.is_mod = is_mod;
-    //     }
-    // }
-
     fn user_ensure_exists(&mut self, nickname: &str) -> bool {
         if self.all_users.contains_key(nickname) {
             true
@@ -483,18 +470,3 @@ impl Chat {
         }
     }
 }
-
-// #[cfg(test)]
-// mod test {
-//     use super::*;
-
-//     #[test]
-//     fn parse_user_name_correct() {
-//         assert_eq!(Some("MyUser"), Chat::parse_user_name("MyUser!myuser@tmi.twitch.tv"));
-//     }
-
-//     #[test]
-//     fn parse_user_name_incorrect() {
-//         assert_eq!(None, Chat::parse_user_name("u wot?"));
-//     }
-// }

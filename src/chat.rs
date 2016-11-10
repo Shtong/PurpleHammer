@@ -22,12 +22,12 @@ enum ChatMessage {
     Join(String),
     /// A user left the chat (nickname)
     Leave(String),
-    /// A user was cleared (nickname)
-    Clear(String),
-    /// A user was timed out (nickname, duration)
-    Timeout(String, u16),
-    /// A user was banned (nickname)
-    Ban(String),
+    /// The channel was cleared
+    Clear,
+    /// A user was timed out (nickname, duration, reason)
+    Timeout(String, u16, Option<String>),
+    /// A user was banned (nickname, reason)
+    Ban(String, Option<String>),
     /// A user was unbanned (nickname)
     Unban(String),
     /// Someone gained or lost operator status (nickname, is_op)
@@ -271,21 +271,37 @@ impl Chat {
     /// Turns a raw IRC message into something easier to process for the client
     fn parse_message(message: Message) -> Option<ChatMessage> {
         match message.command {
-            Command::PRIVMSG(nickname, msg) => {
-                if let Some(msgtags) = message.tags {
-                    match MessageTagData::from_tags(msgtags) {
-                        Ok(tags) => Some(ChatMessage::Message(
-                            nickname,
-                            msg,
-                            tags,
-                        )),
-                        Err(msg) => {
-                            warn!("Error while parsing message tags: {}", msg);
-                            None
-                        },
+            Command::PRIVMSG(_, msg) => {
+                if let Some(msgtags) = message.tags { // We should have tags
+                    if let Some(prefix) = message.prefix { // We should have a prefix
+                        match MessageTagData::from_tags(msgtags) {
+                            Ok(tags) => {
+                                if let Some(nickname) = Chat::parse_user_name_from_prefix(prefix.as_str()) {
+                                    debug!("nickname is {}", nickname);
+                                    Some(ChatMessage::Message(
+                                        nickname.to_owned(),
+                                        msg,
+                                        tags,
+                                    ))
+                                }
+                                else {
+                                    warn!("PRIVMSG dropped: no nickname");
+                                    None
+                                }
+                            },
+                            Err(msg) => {
+                                warn!("Error while parsing message tags: {}", msg);
+                                None
+                            },
+                        }
+                    }
+                    else {
+                        warn!("PRIVMSG dropped: no prefix");
+                        None
                     }
                 }
                 else {
+                    warn!("PRIVMSG dropped: no tags");
                     None
                 }
             },
@@ -323,12 +339,41 @@ impl Chat {
                     None
                 }
             },
-            Command::JOIN(nickname, _, _) => Some(ChatMessage::Join(nickname)),
-            Command::PART(nickname, _) => Some(ChatMessage::Leave(nickname)),
+            Command::JOIN(_, _, _) => {
+                if let Some(nickname) = Chat::parse_user_name_from_message(&message) {
+                    Some(ChatMessage::Join(nickname.to_owned()))
+                }
+                else {
+                    warn!("JOIN dropped: no nickname");
+                    None
+                }
+            },
+            Command::PART(_, _) => {
+                if let Some(nickname) = Chat::parse_user_name_from_message(&message) {
+                    Some(ChatMessage::Leave(nickname.to_owned()))
+                }
+                else {
+                    warn!("PART dropped: no nickname");
+                    None
+                }
+            },
             Command::Raw(cmdname, args, suffix) => {
                 debug!("Custom command '{}' reveived with args {:?} and suffix {:?}.", cmdname, args, suffix);
                 match cmdname.as_str() {
                     "CLEARCHAT" => {
+                        // CLEAR 1s
+                        // Message received : :tmi.twitch.tv CLEARCHAT #le_shtong :triplepat
+                        // Custom command 'CLEARCHAT' reveived with args ["#le_shtong"] and suffix Some("triplepat").
+
+                        // CLEAR global
+                        // Message received : :tmi.twitch.tv CLEARCHAT #le_shtong
+                        // Custom command 'CLEARCHAT' reveived with args ["#le_shtong"] and suffix None.
+
+                        // Ban
+                        // Message received : :tmi.twitch.tv CLEARCHAT #le_shtong :triplepat
+                        // Custom command 'CLEARCHAT' reveived with args ["#le_shtong"] and suffix Some("triplepat").
+
+                        // Unban
 
                         debug!("CLEARCHAT !");
                         None
@@ -430,6 +475,7 @@ impl Chat {
             ChatMessage::Operator(nickname, is_op) => {
                 self.user_ensure_exists(nickname.as_str());
                 if let Some(user) = self.all_users.get_mut(nickname.as_str()) {
+                    info!("Setting op mode of '{}' to {}", nickname, is_op);
                     user.is_mod = is_op;
                 }
                 else {
@@ -440,9 +486,9 @@ impl Chat {
                 error!("The remote server rejected the OAuth token. Make sure it is correct in your configuration file!");
                 // We could exit here, but we'll let the connection close by itself
             },
-            ChatMessage::Ban(_) => {
-                // TODO
-            }
+            // ChatMessage::Ban(_, _) => {
+            //     // TODO
+            // }
             _ => {},
         }
 
@@ -468,5 +514,40 @@ impl Chat {
             self.all_users.insert(owned_nickname.clone(), ChatUser::new(owned_nickname));
             false
         }
+    }
+
+    fn parse_user_name_from_message(message: &Message) -> Option<&str> {
+        if let Some(ref prefix) = message.prefix {
+            Chat::parse_user_name_from_prefix(prefix.as_str())
+        }
+        else {
+            None
+        }
+    }
+
+    fn parse_user_name_from_prefix(prefix: &str) -> Option<&str> {
+        if let Some(pos) = prefix.find('!') {
+            Some(&prefix[..pos])
+        }
+        else {
+            info!("Invalid prefix, could not parse. '{}'", prefix);
+            None
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_user_name_from_prefix_correct() {
+        assert_eq!(Some("MyUser"), Chat::parse_user_name_from_prefix("MyUser!myuser@tmi.twitch.tv"));
+    }
+
+    #[test]
+    fn parse_user_name_from_prefix_incorrect() {
+        assert_eq!(None, Chat::parse_user_name_from_prefix("u wot?"));
     }
 }

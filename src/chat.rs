@@ -28,8 +28,6 @@ enum ChatMessage {
     Timeout(String, u32, Option<String>),
     /// A user was banned (nickname, reason)
     Ban(String, Option<String>),
-    /// A user was unbanned (nickname)
-    Unban(String),
     /// Someone gained or lost operator status (nickname, is_op)
     Operator(String, bool),
     /// Room state
@@ -38,6 +36,56 @@ enum ChatMessage {
     Capability(Vec<String>),
     /// Invalid auth token notification
     InvalidAuthToken,
+    /// This room is now in subscribers-only mode
+    SubModeOn,
+    /// This room is already in subscribers-only mode
+    SubModeAlreadyOn,
+    /// This room is no longer in subscribers-only mode
+    SubModeOff,
+    /// This room is not in subscribers-only mode
+    SubModeAlreadyOff,
+    /// This room is now in slow mode (message minimum distance)
+    SlowModeOn(u32),
+    /// This room is no longer in slow mode
+    SlowModeOff,
+    /// This room is now in r9k mode
+    R9kModeOn,
+    /// This room is already in r9k mode
+    R9kModeAlreadyOn,
+    /// This room is no longer in r9k mode
+    R9kModeOff,
+    /// This room is not in r9k mode
+    R9kModeAlreadyOff,
+    /// Now hosting another channel (hosted channel name)
+    HostModeOn(String),
+    /// This channel is already hosting the requested channel (already hosted channel name)
+    HostModeAlreadyOn(String),
+    /// Exited host mode
+    HostModeOff,
+    /// Notifies of the numner of host commands remaining this half hour (commands number remaining)
+    HostsRemaining(u32),
+    /// This room is now in emote-only mode
+    EmoteModeOn,
+    /// This room is already in emote-only mode
+    EmoteModeAlreadyOn,
+    /// This room is no longer in emote-only mode
+    EmoteModeOff,
+    /// This room is not in emote-only mode
+    EmoteModeAlreadyOff,
+    /// This channel has been suspended
+    ChannelSuspended,
+    /// User successfully timed out (nickname, duration in seconds)
+    TimeoutConfirmed(String, u32),
+    /// User successfully banned (nickname)
+    BanConfirmed(String),
+    /// User successfully unbanned (nickname)
+    UnbanConfirmed(String),
+    /// User cannot be unbanned, because he's not banned (nickname)
+    UnbanNoBan(String),
+    /// User cannot be banned, because he's already banned (nickname)
+    BanAlreadyBanned(String),
+    /// You sent an unrecognized command (command contents)
+    UnrecognisedCommand(String),
 }
 
 enum TwitchUserType {
@@ -416,6 +464,139 @@ impl Chat {
                             Some(ChatMessage::RoomState(RoomStateTags::from_tags_list(msgtags)))
                         }
                         else {
+                            None
+                        }
+                    },
+                    "NOTICE" => {
+                        if let Some(tags) = message.tags {
+                            let mut msg_id_opt = None;
+                            let mut slow_duration_opt = None;
+                            let mut target_channel_opt = None;
+                            let mut number_opt = None;
+                            let mut target_user_opt = None;
+                            let mut ban_duration_opt = None;
+                            let mut invalid_command_opt = None;
+                            for tag in tags {
+                                let Tag(key, val) = tag;
+                                match key.as_str() {
+                                    "msg-id" => msg_id_opt = val,
+                                    "slow-duration" => slow_duration_opt = val.and_then(|v| u32::from_str(v.as_str()).ok()),
+                                    "target-channel" => target_channel_opt = val,
+                                    "number" => number_opt = val.and_then(|v| u32::from_str(v.as_str()).ok()),
+                                    "target-user" => target_user_opt = val,
+                                    "ban-duration" => ban_duration_opt = val.and_then(|v| u32::from_str(v.as_str()).ok()),
+                                    "command" => invalid_command_opt = val,
+                                    &_ => debug!("Unexpected NOTICE tag: {}={:?}", key, val),
+                                }
+                            }
+
+                            if let Some(msg_id) = msg_id_opt {
+                                match msg_id.as_str() {
+                                    "subs_on" => Some(ChatMessage::SubModeOn),
+                                    "already_subs_on" => Some(ChatMessage::SubModeAlreadyOn),
+                                    "subs_off" => Some(ChatMessage::SubModeOff),
+                                    "already_subs_off" => Some(ChatMessage::SubModeAlreadyOff),
+                                    "slow_on" => match slow_duration_opt {
+                                        Some(slow_duration) => Some(ChatMessage::SlowModeOn(slow_duration)),
+                                        None => {
+                                            warn!("NOTICE for a slow mode on: no slow-duration tag");
+                                            None
+                                        }
+                                    },
+                                    "slow_off" => Some(ChatMessage::SlowModeOff),
+                                    "r9k_on" => Some(ChatMessage::R9kModeOn),
+                                    "already_r9k_on" => Some(ChatMessage::R9kModeAlreadyOn),
+                                    "r9k_off" => Some(ChatMessage::R9kModeOff),
+                                    "already_r9k_off" => Some(ChatMessage::R9kModeAlreadyOff),
+                                    "host_on" => match target_channel_opt {
+                                        Some(target_channel) => Some(ChatMessage::HostModeOn(target_channel)),
+                                        None => {
+                                            warn!("NOTICE for a channel host dropped: no target-channel tag");
+                                            None
+                                        }
+                                    },
+                                    "bad_host_hosting" => match target_channel_opt {
+                                        Some(target_channel) => Some(ChatMessage::HostModeAlreadyOn(target_channel)),
+                                        None => {
+                                            warn!("NOTICE for a channel host error dropped: no target-channel tag");
+                                            None
+                                        }
+                                    },
+                                    "host_off" => Some(ChatMessage::HostModeOff),
+                                    "hosts_remaining" => match number_opt {
+                                        Some(number) => Some(ChatMessage::HostsRemaining(number)),
+                                        None => {
+                                            warn!("NOTICE for remaining host count dropped: no number tag");
+                                            None
+                                        }
+                                    },
+                                    "emote_only_on" => Some(ChatMessage::EmoteModeOn),
+                                    "already_emote_only_on" => Some(ChatMessage::EmoteModeAlreadyOn),
+                                    "emote_only_off" => Some(ChatMessage::EmoteModeOff),
+                                    "already_emote_only_off" => Some(ChatMessage::EmoteModeAlreadyOff),
+                                    "msg_channel_suspended" => Some(ChatMessage::ChannelSuspended), // RIP
+                                    "timeout_success" => match target_user_opt {
+                                        Some(target_user) => match ban_duration_opt {
+                                            Some(ban_duration) => Some(ChatMessage::TimeoutConfirmed(target_user, ban_duration)),
+                                            None => {
+                                                warn!("NOTICE for a timeout dropped: no target-user tag");
+                                                None
+                                            }
+                                        },
+                                        None => {
+                                            warn!("NOTICE for a timeout dropped: no ban-duration tag");
+                                            None
+                                        }
+                                    },
+                                    "ban_success" => match target_user_opt {
+                                        Some(target_user) => Some(ChatMessage::BanConfirmed(target_user)),
+                                        None => {
+                                            warn!("NOTICE for a ban success dropped : no target-user tag");
+                                            None
+                                        }
+                                    },
+                                    "unban_success" => match target_user_opt {
+                                        Some(target_user) => Some(ChatMessage::UnbanConfirmed(target_user)),
+                                        None => {
+                                            warn!("NOTICE for an unban success dropped: no target-user tag");
+                                            None
+                                        }
+                                    },
+                                    "bad_unban_no_ban" => match target_user_opt {
+                                        Some(target_user) => Some(ChatMessage::UnbanNoBan(target_user)),
+                                        None => {
+                                            warn!("NOTICE for an unban failure dropped: no target-user tag");
+                                            None
+                                        }
+                                    },
+                                    "already_banned" => match target_user_opt {
+                                        Some(target_user) => Some(ChatMessage::BanAlreadyBanned(target_user)),
+                                        None => {
+                                            warn!("NOTICE for an ban failure dropped: no target-user tag");
+                                            None
+                                        }
+                                    },
+                                    "unrecognized_cmd" => match invalid_command_opt {
+                                        Some(invalid_command) => Some(ChatMessage::UnrecognisedCommand(invalid_command)),
+                                        None => {
+                                            warn!("NOTICE for an unrecognized command dropped: no command tag");
+                                            None
+                                        }
+                                    },
+                                    &_ => {
+                                        warn!("NOTICE command dropped: unknown message ID '{}'", msg_id);
+                                        None
+                                    }
+                                }
+                            }
+                            else {
+                                warn!("NOTICE dropped: no message ID");
+                                None
+                            }
+
+                        }
+                        else {
+                            warn!("NOTICE dropped: no tags");
                             None
                         }
                     }
